@@ -11,11 +11,17 @@ from typing import Optional, List
 from datetime import datetime, timezone
 from enum import Enum
 
+import logging
+
+import httpx
 from google import genai
+from google.genai import errors as genai_errors
 from pydantic import BaseModel, Field, field_validator
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -200,6 +206,15 @@ class CourseCreatorError(Exception):
     pass
 
 
+class CourseCreatorBusyError(CourseCreatorError):
+    """Gemini is overloaded or timed out on every model tried; safe to retry later."""
+    pass
+
+
+# HTTP statuses from Gemini that mean "temporarily unavailable, try again"
+RETRYABLE_STATUS_CODES = [429, 500, 502, 503, 504]
+
+
 class CourseCreator:
     """
     Main class for generating personalized courses using the Google Gemini API.
@@ -208,7 +223,9 @@ class CourseCreator:
     to guide course generation.
     """
 
-    DEFAULT_MODEL = "gemini-2.5-flash"
+    DEFAULT_MODEL = "gemini-3.5-flash"
+    # Tried in order if the primary model stays overloaded after retries
+    FALLBACK_MODELS = ["gemini-2.5-flash"]
 
     def __init__(
         self,
@@ -223,7 +240,7 @@ class CourseCreator:
             constitution_path: Path to the constitution markdown file.
                              Defaults to config/constitution.md relative to this file.
             api_key: Gemini API key. Defaults to GEMINI_API_KEY env var.
-            model: Model to use. Defaults to gemini-1.5-flash.
+            model: Model to use. Defaults to DEFAULT_MODEL.
         """
         # Set up API client
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
@@ -233,8 +250,21 @@ class CourseCreator:
                 "or pass api_key parameter."
             )
 
-        self.client = genai.Client(api_key=self.api_key)
+        self.client = genai.Client(
+            api_key=self.api_key,
+            http_options={
+                "timeout": 120_000,  # ms per attempt
+                # SDK-level retries with exponential backoff for transient errors
+                "retry_options": {
+                    "attempts": 3,
+                    "initial_delay": 2.0,
+                    "max_delay": 10.0,
+                    "http_status_codes": RETRYABLE_STATUS_CODES,
+                },
+            },
+        )
         self.model = model or self.DEFAULT_MODEL
+        self.fallback_models = [m for m in self.FALLBACK_MODELS if m != self.model]
 
         # Load constitution
         if constitution_path is None:
@@ -311,15 +341,7 @@ class CourseCreator:
         user_message = self._build_user_message(user_profile, course_request)
 
         try:
-            # Make API call with system instruction via config
-            # The google-genai package uses client.models.generate_content()
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=user_message,
-                config={
-                    "system_instruction": self.constitution
-                }
-            )
+            response, model_used = self._generate_with_fallback(user_message)
 
             # Extract content
             content = response.text
@@ -337,15 +359,49 @@ class CourseCreator:
                 content=content,
                 depth=course_request.depth,
                 topic=course_request.topic,
-                model_used=self.model,
+                model_used=model_used,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 cache_read_tokens=0,
                 cache_creation_tokens=0
             )
 
+        except CourseCreatorError:
+            raise
         except Exception as e:
             raise CourseCreatorError(f"Failed to generate course: {str(e)}") from e
+
+    def _generate_with_fallback(self, user_message: str):
+        """
+        Call Gemini, moving to the next model if one stays overloaded.
+
+        Each model already gets SDK-level retries with backoff. Only
+        transient errors (overload, rate limit, timeout) trigger a fallback;
+        anything else (bad key, bad request) is raised immediately.
+
+        Returns:
+            (response, model_name) for the first model that succeeded
+        """
+        last_error = None
+        for model in [self.model, *self.fallback_models]:
+            try:
+                response = self.client.models.generate_content(
+                    model=model,
+                    contents=user_message,
+                    config={"system_instruction": self.constitution},
+                )
+                return response, model
+            except genai_errors.APIError as e:
+                if e.code not in RETRYABLE_STATUS_CODES:
+                    raise
+                last_error = e
+            except httpx.TimeoutException as e:
+                last_error = e
+            logger.warning("Gemini model %s unavailable after retries: %s", model, last_error)
+
+        raise CourseCreatorBusyError(
+            f"All Gemini models unavailable: {last_error}"
+        ) from last_error
 
     def _extract_title(self, content: str, fallback_topic: str) -> str:
         """Extract the course title from generated content."""

@@ -18,6 +18,7 @@ from auth import get_current_user
 from course_creator import (
     CourseCreator,
     CourseCreatorError,
+    CourseCreatorBusyError,
     UserProfile,
     CourseRequest,
     LearningStyle,
@@ -169,7 +170,7 @@ def build_course_request(data: CourseCreateRequest) -> CourseRequest:
 # ============================================================================
 
 @router.post("", response_model=CourseCreateResponse, status_code=status.HTTP_201_CREATED)
-async def create_course(
+def create_course(
     course_data: CourseCreateRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -249,16 +250,24 @@ async def create_course(
             )
         )
 
-    except CourseCreatorError as e:
+    except CourseCreatorBusyError:
+        logger.exception("Course generation failed: Gemini overloaded")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate course: {str(e)}"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Course generation is busy right now. Please try again in a minute."
         )
-    except Exception as e:
-        db.rollback()
+    except CourseCreatorError:
+        logger.exception("Course generation failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create course: {str(e)}"
+            detail="Failed to generate course. Please try again."
+        )
+    except Exception:
+        db.rollback()
+        logger.exception("Course creation failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create course. Please try again."
         )
 
 
