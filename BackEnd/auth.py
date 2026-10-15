@@ -1,5 +1,7 @@
+import os
 from datetime import datetime, timedelta
 from typing import Optional
+from dotenv import load_dotenv
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
@@ -8,8 +10,11 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import User
 
+load_dotenv()
+
 # Configuration
-SECRET_KEY = "syllabud-secret-key-change-in-production"  # In production, use env variable
+# Required: the app fails at startup if JWT_SECRET_KEY is not set
+SECRET_KEY = os.environ["JWT_SECRET_KEY"]
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 
