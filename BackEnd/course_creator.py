@@ -223,9 +223,9 @@ class CourseCreator:
     to guide course generation.
     """
 
-    DEFAULT_MODEL = "gemini-2.5-flash"
+    DEFAULT_MODEL = "gemini-3.5-flash"
     # Tried in order if the primary model stays overloaded after retries
-    FALLBACK_MODELS = ["gemini-3.5-flash"]
+    FALLBACK_MODELS = ["gemini-2.5-flash"]
 
     def __init__(
         self,
