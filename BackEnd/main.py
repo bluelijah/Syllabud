@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
+import logging
 import os
 
 from routes.auth_routes import router as auth_router
@@ -8,6 +10,8 @@ from routes.course_routes import router as course_router
 from routes.admin_routes import router as admin_router
 from database import init_db, engine
 from sqlalchemy import text
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -65,5 +69,7 @@ def test_db():
             result = conn.execute(text("SELECT 1"))
             result.fetchone()
         return {"status": "success", "database": "connected"}
-    except Exception as e:
-        return {"status": "error", "error": str(e)}
+    except Exception:
+        # Log details server-side only; the raw error can include DB host/user
+        logger.exception("Database connectivity check failed")
+        return JSONResponse(status_code=503, content={"status": "error", "database": "unavailable"})
