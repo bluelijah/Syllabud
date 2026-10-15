@@ -50,12 +50,34 @@ Syllabud is an intelligent course generation platform that creates personalized 
 
 3. **Configure environment variables**
 
-   Create `BackEnd/.env`:
-   ```
-   GEMINI_API_KEY=your-api-key-here
+   Copy the example file and fill in your own values:
+   ```bash
+   cp .env.example .env
    ```
 
-4. **Set up the frontend**
+   | Variable | Required | Purpose |
+   |---|---|---|
+   | `GEMINI_API_KEY` | Yes (to generate courses) | Google Gemini API key |
+   | `JWT_SECRET_KEY` | Yes, the app won't start without it | Signs and verifies login tokens |
+   | `ADMIN_API_KEY` | Yes, the app won't start without it | Key for `/admin` endpoints, sent as the `X-Admin-Key` header |
+   | `FRONTEND_URL` | No | Extra frontend origin allowed through CORS |
+
+   Generate random values for the two secrets with:
+   ```bash
+   python -c "import secrets; print(secrets.token_urlsafe(64))"
+   ```
+
+   Leave `DATABASE_URL` unset locally. The backend then uses a local SQLite file (`BackEnd/syllabud.db`). Never commit `.env` or `*.db` files; both are in `.gitignore`.
+
+4. **Seed synthetic dev data (optional)**
+
+   From `BackEnd/`:
+   ```bash
+   python seed_dev.py
+   ```
+   This creates the SQLite tables, three fake users (`testuser1@example.com` through `testuser3@example.com`, password `devpassword123`) with learning preferences, and a sample course. It refuses to run if `DATABASE_URL` is set, so it can't touch a production database.
+
+5. **Set up the frontend**
    ```bash
    cd FrontEnd
    npm install
@@ -96,7 +118,9 @@ Syllabud/
 │   ├── routes/
 │   │   ├── auth_routes.py   # Auth endpoints
 │   │   └── course_routes.py # Course CRUD + Gemini integration
-│   └── .env                 # Environment variables (create this)
+│   ├── seed_dev.py          # Seeds local SQLite with fake dev data
+│   ├── .env.example         # Template for environment variables
+│   └── .env                 # Your local environment variables (create from .env.example, never commit)
 ├── FrontEnd/
 │   ├── src/
 │   │   ├── pages/           # Page components

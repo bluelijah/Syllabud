@@ -1,23 +1,27 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Header
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
 import os
+import secrets
 
 from database import get_db
 from models import APIUsage, User
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
-# Simple admin key auth - set ADMIN_API_KEY env variable
-ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "syllabud-admin-2024")
+load_dotenv()
+
+# Simple admin key auth - required ADMIN_API_KEY env variable, no fallback
+ADMIN_API_KEY = os.environ["ADMIN_API_KEY"]
 
 
-def verify_admin_key(api_key: str = Query(..., alias="key")):
-    """Verify admin API key from query parameter."""
-    if api_key != ADMIN_API_KEY:
+def verify_admin_key(api_key: str = Header(..., alias="X-Admin-Key")):
+    """Verify admin API key from the X-Admin-Key request header."""
+    if not secrets.compare_digest(api_key.encode("utf-8"), ADMIN_API_KEY.encode("utf-8")):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid admin key"
